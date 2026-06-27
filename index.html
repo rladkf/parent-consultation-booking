@@ -7,8 +7,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
-    <!-- 🔥 Firebase v8 SDK 추가 (실시간 연동을 위한 라이브러리) -->
+    <!-- 🔥 Firebase v8 SDK 추가 (실시간 연동 및 인증을 위한 라이브러리) -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 
     <style>
@@ -159,22 +160,6 @@
     </div>
 
     <script>
-const firebaseConfig = {
-  apiKey: "AIzaSyCEnovN8elvCLCxaPbijTFrUWEJ6vnbNmY",
-  authDomain: "parent-consultation-booking.firebaseapp.com",
-  projectId: "parent-consultation-booking",
-  storageBucket: "parent-consultation-booking.firebasestorage.app",
-  messagingSenderId: "609057469461",
-  appId: "1:609057469461:web:3d8816fa1a006e55124a1c",
-  measurementId: "G-KLWLS1W7VT"
-};
-        
-        let db;
-        if (firebaseConfig.apiKey !== "여기에_API_KEY_입력") {
-            firebase.initializeApp(firebaseConfig);
-            db = firebase.firestore();
-        }
-
         // --- 학생 데이터 ---
         const students = [
             { id: 1, name: "짠낫민(TRAN NHAT MINH)", parent: "학부모님", phone: "010-7418-2899" },
@@ -226,27 +211,81 @@ const firebaseConfig = {
         let selectedTime = null;
         let isAuthenticated = false; 
 
-        // --- Firebase 연동 ---
-        if (db) {
-            db.collection("schoolApp").doc("class3-1").onSnapshot((doc) => {
-                if (doc.exists) {
-                    const data = doc.data();
-                    bookedSlots = data.bookedSlots || {};
-                    optOuts = data.optOuts || {};
-                    teacherNotes = data.teacherNotes || {};
-                    completedStatus = data.completedStatus || {};
+        // --- 🌟 Firebase 연동 및 권한 처리 ---
+        let db;
+        let auth;
+        let docRef;
+
+        async function initFirebase() {
+            try {
+                if (typeof __firebase_config !== 'undefined') {
+                    // 현재 이 화면(에디터/캔버스 환경)에서 실행 시
+                    const config = JSON.parse(__firebase_config);
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    firebase.initializeApp(config);
+                    db = firebase.firestore();
+                    auth = firebase.auth();
+                    
+                    // 정해진 올바른 경로 규칙 적용
+                    docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('bookingApp').doc('class3-1');
+                    
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await auth.signInWithCustomToken(__initial_auth_token);
+                    } else {
+                        await auth.signInAnonymously();
+                    }
+                } else {
+                    // GitHub Pages 등 별도의 웹 호스팅에서 선생님 고유 Firebase 실행 시
+                    const firebaseConfig = {
+                        apiKey: "AIzaSyCEnovN8elvCLCxaPbijTFrUWEJ6vnbNmY",
+                        authDomain: "parent-consultation-booking.firebaseapp.com",
+                        projectId: "parent-consultation-booking",
+                        storageBucket: "parent-consultation-booking.firebasestorage.app",
+                        messagingSenderId: "609057469461",
+                        appId: "1:609057469461:web:3d8816fa1a006e55124a1c",
+                        measurementId: "G-KLWLS1W7VT"
+                    };
+                    firebase.initializeApp(firebaseConfig);
+                    db = firebase.firestore();
+                    auth = firebase.auth();
+                    docRef = db.collection("schoolApp").doc("class3-1");
+                    
+                    // 권한 오류(Missing or insufficient permissions) 방지를 위해 익명 로그인 처리 추가
+                    await auth.signInAnonymously();
                 }
-                if (currentView === 'parent') renderParentView();
-                else if (document.getElementById('main-content').innerHTML.includes('전체 상담 기록표')) renderReportView();
-                else renderTeacherView();
-            });
-        } else {
-            renderParentView();
+
+                // 인증 상태 확인 후 Snapshot 등록
+                auth.onAuthStateChanged((user) => {
+                    if (user) {
+                        docRef.onSnapshot((doc) => {
+                            if (doc.exists) {
+                                const data = doc.data();
+                                bookedSlots = data.bookedSlots || {};
+                                optOuts = data.optOuts || {};
+                                teacherNotes = data.teacherNotes || {};
+                                completedStatus = data.completedStatus || {};
+                            }
+                            // 데이터 동기화 시 렌더링 업데이트
+                            if (currentView === 'parent') renderParentView();
+                            else if (document.getElementById('main-content').innerHTML.includes('전체 상담 기록표')) renderReportView();
+                            else renderTeacherView();
+                        }, (error) => {
+                            console.error("Firestore 권한/연결 에러:", error);
+                            showModal("데이터베이스 연결 오류", "Firebase 보안 규칙(Security Rules) 설정이 필요합니다.\nFirebase 콘솔에서 Firestore Database -> 규칙(Rules) 탭으로 이동하여\nallow read, write: if true;\n로 변경한 후 게시(Publish)해주세요.", true);
+                        });
+                    }
+                });
+            } catch (error) {
+                console.error("Firebase 초기화 에러:", error);
+                renderParentView();
+            }
         }
 
+        initFirebase();
+
         function syncToFirebase() {
-            if (!db) return;
-            db.collection("schoolApp").doc("class3-1").set({
+            if (!db || !docRef) return;
+            docRef.set({
                 bookedSlots: bookedSlots,
                 optOuts: optOuts,
                 teacherNotes: teacherNotes,
@@ -507,8 +546,32 @@ const firebaseConfig = {
             }
         }
 
-        function selectDate(date) { selectedDate = date; selectedTime = null; renderParentView(); }
-        function selectTime(time) { selectedTime = time; renderTimeSlots(); }
+        // 🌟 수정: 스크롤 초기화 방지 및 재터치 시 해제 기능
+        function selectDate(date) { 
+            selectedDate = date; 
+            selectedTime = null; 
+            
+            // 날짜 버튼 UI만 개별적으로 업데이트 (스크롤 튕김 현상 방지)
+            const dateButtons = document.querySelectorAll('#dateSelector button');
+            dateButtons.forEach(btn => {
+                if (btn.innerText.trim() === date) {
+                    btn.className = "snap-start flex-none px-5 py-3 rounded-full border-2 text-base font-bold transition-colors bg-blue-500 text-white border-blue-500 shadow-md";
+                } else {
+                    btn.className = "snap-start flex-none px-5 py-3 rounded-full border-2 text-base font-bold transition-colors bg-white text-gray-700 border-gray-300 hover:bg-gray-100";
+                }
+            });
+            
+            renderTimeSlots(); 
+        }
+
+        function selectTime(time) { 
+            if (selectedTime === time) {
+                selectedTime = null; // 재터치 시 선택 해제
+            } else {
+                selectedTime = time; 
+            }
+            renderTimeSlots(); 
+        }
 
         function renderTimeSlots() {
             const container = document.getElementById('timeSlotsContainer');

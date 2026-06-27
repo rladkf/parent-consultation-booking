@@ -7,9 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
-    <!-- 🔥 Firebase v8 SDK 추가 -->
+    <!-- 🔥 Firebase v8 SDK 추가 (실시간 연동을 위한 라이브러리) -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 
     <style>
@@ -160,6 +159,22 @@
     </div>
 
     <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyCEnovN8elvCLCxaPbijTFrUWEJ6vnbNmY",
+            authDomain: "parent-consultation-booking.firebaseapp.com",
+            projectId: "parent-consultation-booking",
+            storageBucket: "parent-consultation-booking.firebasestorage.app",
+            messagingSenderId: "609057469461",
+            appId: "1:609057469461:web:3d8816fa1a006e55124a1c",
+            measurementId: "G-KLWLS1W7VT"
+        };
+        
+        let db;
+        if (firebaseConfig.apiKey !== "여기에_API_KEY_입력") {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+        }
+
         // --- 학생 데이터 ---
         const students = [
             { id: 1, name: "짠낫민(TRAN NHAT MINH)", parent: "학부모님", phone: "010-7418-2899" },
@@ -211,28 +226,14 @@
         let selectedTime = null;
         let isAuthenticated = false; 
 
-        // 🚀🚀🚀 Firebase 완벽 다이렉트 연동 로직 🚀🚀🚀
-        // 선생님의 DB를 어디서 접속하든(노트북 캔버스 환경, 모바일 GitHub 환경) 완벽하게 동일하게 바라보도록 강제 통일했습니다.
-        const firebaseConfig = {
-            apiKey: "AIzaSyCEnovN8elvCLCxaPbijTFrUWEJ6vnbNmY",
-            authDomain: "parent-consultation-booking.firebaseapp.com",
-            projectId: "parent-consultation-booking",
-            storageBucket: "parent-consultation-booking.firebasestorage.app",
-            messagingSenderId: "609057469461",
-            appId: "1:609057469461:web:3d8816fa1a006e55124a1c",
-            measurementId: "G-KLWLS1W7VT"
-        };
-        
-        let db;
-        let docRef;
-
+        // --- Firebase 연동 ---
         function initFirebase() {
             try {
                 if (!firebase.apps.length) {
                     firebase.initializeApp(firebaseConfig);
                 }
                 db = firebase.firestore();
-                docRef = db.collection("schoolApp").doc("class3-1");
+                let docRef = db.collection("schoolApp").doc("class3-1");
 
                 // 🌟 실시간 데이터 감지 시작
                 docRef.onSnapshot((doc) => {
@@ -246,8 +247,12 @@
                     
                     // 데이터 변경 시 화면 업데이트
                     if (currentView === 'parent') {
+                        // 🌟 수정된 부분: 최초 접속 시 '데이터를 불러오는 중' 상태를 없애고 학부모 화면을 그립니다.
+                        if (!document.getElementById('studentSelect')) {
+                            renderParentView();
+                        }
                         // 🌟 학부모 화면: 폼 작성 중 화면이 날아가는 것을 방지하기 위해 시간표만 업데이트!
-                        if (selectedStudent && isAuthenticated) {
+                        else if (selectedStudent && isAuthenticated) {
                             renderTimeSlots();
                         }
                     }
@@ -264,30 +269,28 @@
                     if (error.code === 'permission-denied') {
                         showModal("🚨 실시간 연동 차단됨 (권한 오류)", "Firebase 보안 규칙이 닫혀있어 데이터 연동이 불가능합니다.\n\nFirebase 콘솔 > Firestore Database > [규칙] 탭에서\nallow read, write: if true;\n로 수정 후 [게시]를 반드시 눌러주세요.", true);
                     }
+                    // 에러가 나더라도 무한 로딩에 빠지지 않게 화면은 표시
+                    if (!document.getElementById('studentSelect') && currentView === 'parent') {
+                        renderParentView();
+                    }
                 });
             } catch (error) {
                 console.error("Firebase 초기화 에러:", error);
                 renderParentView();
             }
         }
-
-        // 스크립트 로드 시 즉시 초기화
+        
+        // 즉시 실행
         initFirebase();
 
-        // 🌟 실시간 저장 로직
         function syncToFirebase() {
-            if (!db || !docRef) return;
-            docRef.set({
+            if (!db) return;
+            db.collection("schoolApp").doc("class3-1").set({
                 bookedSlots: bookedSlots,
                 optOuts: optOuts,
                 teacherNotes: teacherNotes,
                 completedStatus: completedStatus
-            }, { merge: true }).catch(error => { 
-                console.error("저장 에러:", error); 
-                if (error.code === 'permission-denied') {
-                    showModal("🚨 저장 실패 (권한 오류)", "Firebase 규칙이 차단되어 데이터를 저장할 수 없습니다.", true);
-                }
-            });
+            }, { merge: true }).catch(error => { console.error("저장 에러:", error); });
         }
 
         // --- 모달 제어 함수 ---
@@ -407,6 +410,7 @@
         // --- 뷰 전환 ---
         async function switchView(view) {
             if (view === 'teacher' && currentView !== 'teacher') {
+                // 선생님 요청: 인증 시 숫자 전용 키패드 호출
                 const pin = await customPrompt('교사 인증', '교사 인증번호를 입력해주세요.', 'password', '', 'numeric');
                 if (pin !== '3495') {
                     showModal('인증 실패', '인증번호가 일치하지 않습니다.', true);
@@ -527,6 +531,7 @@
             const phoneParts = student.phone.split('-');
             const last4Digits = phoneParts[phoneParts.length - 1]; 
             
+            // 선생님 요청: 연락처 뒷자리 인증 시 숫자 전용 키패드 호출 
             const inputLast4 = await customPrompt('본인 확인', '개인정보 보호를 위해 이 링크를 안내 받으신 학부모님의 연락처 뒷자리(4자리)를 입력해주세요.', 'password', '', 'numeric');
             
             if (inputLast4 === last4Digits) {
@@ -541,11 +546,12 @@
             }
         }
 
-        // 🌟 수정: 스크롤 초기화 방지 및 재터치 시 해제 기능 유지
+        // 🌟 수정: 스크롤 초기화 방지 및 재터치 시 해제 기능
         function selectDate(date) { 
             selectedDate = date; 
             selectedTime = null; 
             
+            // 날짜 버튼 UI만 개별적으로 업데이트 (스크롤 튕김 현상 방지)
             const dateButtons = document.querySelectorAll('#dateSelector button');
             dateButtons.forEach(btn => {
                 if (btn.innerText.trim() === date) {
@@ -560,7 +566,7 @@
 
         function selectTime(time) { 
             if (selectedTime === time) {
-                selectedTime = null; 
+                selectedTime = null; // 재터치 시 선택 해제
             } else {
                 selectedTime = time; 
             }
@@ -635,6 +641,7 @@
 
         // --- 🌟 교사용 수동 예약 및 전체 초기화 로직 ---
         function openTeacherModal(studentName = '') {
+            // 교사 수동 변경 시에도 동그라미 화살표 전용 커스텀 드롭다운 사용
             let studentOptions = [{value:'', label:'-- 학생 선택 --'}].concat(students.map(s => ({value: s.name, label: s.name})));
             document.getElementById('t-student-container').innerHTML = renderCustomSelect('t-student', studentOptions, studentName || '-- 학생 선택 --');
             if (studentName) document.getElementById('t-student-text').dataset.value = studentName;

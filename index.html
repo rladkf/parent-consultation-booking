@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>여름방학 맞이 학부모 상담 예약</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- 🔥 Firebase v8 SDK 추가 (실시간 연동을 위한 라이브러리) -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background: linear-gradient(135deg, #e0f2fe 0%, #7dd3fc 100%);
+            min-height: 100vh;
+        }
+
+        ::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        #custom-modal-bg {
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(2px);
+        }
+    </style>
+</head>
+<body class="p-0 md:p-4 text-gray-800 flex justify-center">
+
+    <div class="w-full max-w-md bg-white md:rounded-3xl shadow-2xl overflow-hidden flex flex-col min-h-screen md:min-h-[850px] relative">
+        
+        <!-- 탭 (활성화: 파란색, 비활성화: 진회색) -->
+        <div class="flex bg-gray-800 text-sm font-bold">
+            <button onclick="switchView('parent')" id="tab-parent" class="flex-1 py-3 bg-blue-600 text-white transition-colors">👩‍👦 학부모용</button>
+            <button onclick="switchView('teacher')" id="tab-teacher" class="flex-1 py-3 bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors">👩‍🏫 교사 확인용</button>
+        </div>
+
+        <!-- 헤더 -->
+        <div class="bg-gradient-to-r from-blue-500 to-cyan-400 text-white p-6 rounded-b-3xl shadow-md relative z-10">
+            <div class="flex justify-between items-center mb-3">
+                <span class="bg-white/20 px-3 py-1 rounded-full text-sm font-bold backdrop-blur-sm">3학년 1반</span>
+                <i class="fas fa-leaf text-cyan-100 text-lg"></i>
+            </div>
+            <h1 class="text-3xl font-bold leading-tight tracking-tight">여름방학 맞이<br>학부모 전화상담<br>예약 시스템</h1>
+            <p class="text-base mt-3 text-cyan-50 opacity-90"><i class="far fa-calendar-alt mr-1"></i> 7/27(월) ~ 8/10(월)</p>
+        </div>
+
+        <!-- 메인 콘텐츠 영역 -->
+        <div class="flex-1 overflow-y-auto p-5 pb-24" id="main-content">
+            <div class="flex justify-center items-center h-full">
+                <p class="text-gray-500 font-bold animate-pulse">데이터를 불러오는 중입니다...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 각종 모달창 영역 -->
+    <div id="custom-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+        <div id="custom-modal-bg" class="absolute inset-0"></div>
+        <div class="bg-white rounded-2xl p-6 shadow-2xl z-10 w-full max-w-sm text-center transform transition-all">
+            <div id="modal-icon" class="text-5xl mb-4 text-blue-500"><i class="fas fa-check-circle"></i></div>
+            <h3 id="modal-title" class="text-xl font-bold mb-2">알림</h3>
+            <p id="modal-message" class="text-gray-700 mb-6 text-base whitespace-pre-line leading-relaxed"></p>
+            <button onclick="closeModal()" class="w-full bg-blue-500 text-white font-bold py-4 rounded-xl hover:bg-blue-600 transition-colors text-lg">확인</button>
+        </div>
+    </div>
+
+    <!-- 프롬프트 모달 (비밀번호, 사유 등) -->
+    <div id="prompt-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
+        <div class="bg-white rounded-2xl p-6 shadow-2xl z-10 w-full max-w-sm text-center transform transition-all">
+            <h3 id="prompt-title" class="text-xl font-bold mb-3"></h3>
+            <p id="prompt-message" class="text-gray-700 mb-5 text-base whitespace-pre-line leading-relaxed"></p>
+            <input type="text" id="prompt-input" class="w-full border-gray-300 rounded-xl p-4 mb-5 bg-gray-50 border-2 focus:ring-2 focus:ring-blue-400 focus:outline-none text-lg">
+            <div class="flex gap-3">
+                <button id="prompt-cancel" class="flex-1 bg-gray-200 text-gray-800 font-bold py-4 rounded-xl hover:bg-gray-300 text-base">취소</button>
+                <button id="prompt-confirm" class="flex-1 bg-blue-500 text-white font-bold py-4 rounded-xl hover:bg-blue-600 text-base">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🌟 교사 수동 예약 모달 -->
+    <div id="teacher-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="closeTeacherModal()"></div>
+        <div class="bg-white rounded-2xl p-6 shadow-2xl z-10 w-full max-w-sm transform transition-all">
+            <h3 class="text-xl font-bold mb-1 text-gray-800"><i class="fas fa-edit text-blue-500 mr-2"></i>예약 시간 조정 (교사용)</h3>
+            <p class="text-sm text-gray-500 mb-5">연락처 인증 없이 즉시 일정을 덮어씁니다.</p>
+            
+            <div class="mb-4 mt-4 relative">
+                <label class="block text-sm font-bold text-gray-700 mb-2">학생 선택</label>
+                <div id="t-student-container"></div>
+            </div>
+            <div class="mb-4 relative">
+                <label class="block text-sm font-bold text-gray-700 mb-2">날짜 (미신청/추후결정 시 무시됨)</label>
+                <div id="t-date-container"></div>
+            </div>
+            <div class="mb-6 relative">
+                <label class="block text-sm font-bold text-gray-700 mb-2">변경할 시간</label>
+                <div id="t-time-container"></div>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="closeTeacherModal()" class="flex-1 bg-gray-200 text-gray-800 font-bold py-3.5 rounded-xl hover:bg-gray-300 text-base">취소</button>
+                <button onclick="saveTeacherBooking()" class="flex-1 bg-blue-500 text-white font-bold py-3.5 rounded-xl hover:bg-blue-600 text-base shadow-md">변경 저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🌟 기록장 모달 -->
+    <div id="notes-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="closeNotesModal()"></div>
+        <div class="bg-white rounded-2xl p-6 shadow-2xl z-10 w-full max-w-md transform transition-all flex flex-col max-h-[90vh]">
+            <h3 class="text-xl font-bold mb-4 text-gray-800 flex justify-between items-center">
+                <span><i class="fas fa-book text-blue-500 mr-2"></i><span id="note-student-name"></span> 학생 기록장</span>
+                <button onclick="closeNotesModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-2xl"></i></button>
+            </h3>
+            <div class="overflow-y-auto flex-1 pr-1">
+                <div class="mb-5">
+                    <label class="block text-sm font-bold text-blue-700 mb-2"><i class="fas fa-thumbtack mr-1"></i>상담 전 참고사항</label>
+                    <textarea id="pre-note" rows="4" class="w-full border border-gray-300 rounded-xl p-3 bg-blue-50 text-sm focus:ring-2 focus:ring-blue-400"></textarea>
+                </div>
+                <div class="mb-2">
+                    <label class="block text-sm font-bold text-green-700 mb-2"><i class="fas fa-pen mr-1"></i>상담 내용 기록</label>
+                    <textarea id="post-note" rows="5" class="w-full border border-gray-300 rounded-xl p-3 bg-green-50 text-sm focus:ring-2 focus:ring-green-400"></textarea>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-4 pt-4 border-t border-gray-100">
+                <button onclick="saveNotes()" class="w-full bg-blue-500 text-white font-bold py-3.5 rounded-xl hover:bg-blue-600 text-base shadow-md">저장하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🌟 전체 사전 기록장 모달 -->
+    <div id="all-notes-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="closeAllNotesModal()"></div>
+        <div class="bg-white rounded-2xl p-5 shadow-2xl z-10 w-full max-w-md transform transition-all flex flex-col max-h-[90vh]">
+            <h3 class="text-xl font-bold mb-3 text-gray-800 flex justify-between items-center">
+                <span><i class="fas fa-users text-indigo-500 mr-2"></i>전체 사전 기록</span>
+                <button onclick="closeAllNotesModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-2xl"></i></button>
+            </h3>
+            <div id="all-notes-container" class="overflow-y-auto flex-1 pr-2 space-y-3"></div>
+            <div class="mt-4 pt-4 border-t border-gray-100">
+                <button onclick="saveAllNotes()" class="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 shadow-md">전체 저장하기</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+const firebaseConfig = {
+  apiKey: "AIzaSyCEnovN8elvCLCxaPbijTFrUWEJ6vnbNmY",
+  authDomain: "parent-consultation-booking.firebaseapp.com",
+  projectId: "parent-consultation-booking",
+  storageBucket: "parent-consultation-booking.firebasestorage.app",
+  messagingSenderId: "609057469461",
+  appId: "1:609057469461:web:3d8816fa1a006e55124a1c",
+  measurementId: "G-KLWLS1W7VT"
+};
+        
+        let db;
+        if (firebaseConfig.apiKey !== "여기에_API_KEY_입력") {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+        }
+
+        // --- 학생 데이터 ---
+        const students = [
+            { id: 1, name: "짠낫민(TRAN NHAT MINH)", parent: "학부모님", phone: "010-7418-2899" },
+            { id: 2, name: "구본준", parent: "학부모님", phone: "010-3758-4264" },
+            { id: 3, name: "김유림", parent: "학부모님", phone: "010-8353-9988" },
+            { id: 4, name: "김은성", parent: "학부모님", phone: "010-7688-4082" },
+            { id: 5, name: "문서준", parent: "학부모님", phone: "010-8652-7434" },
+            { id: 6, name: "민경준", parent: "학부모님", phone: "010-3254-2415" },
+            { id: 7, name: "배진형", parent: "학부모님", phone: "010-2646-7040" },
+            { id: 8, name: "선지후", parent: "학부모님", phone: "010-2940-0697" },
+            { id: 9, name: "신정호", parent: "학부모님", phone: "010-9492-3738" },
+            { id: 10, name: "유태현", parent: "학부모님", phone: "010-7490-9007" },
+            { id: 11, name: "조연우", parent: "학부모님", phone: "010-2924-8221" },
+            { id: 12, name: "조재혁", parent: "학부모님", phone: "010-6375-1389" },
+            { id: 13, name: "김라윤", parent: "학부모님", phone: "010-3124-4770" },
+            { id: 14, name: "김태린", parent: "학부모님", phone: "010-3717-5871" },
+            { id: 15, name: "김하은", parent: "학부모님", phone: "010-5747-4131" },
+            { id: 16, name: "나하음", parent: "학부모님", phone: "010-6211-9745" },
+            { id: 17, name: "배지원", parent: "학부모님", phone: "010-3082-2185" },
+            { id: 18, name: "안유민", parent: "학부모님", phone: "010-7723-3131" },
+            { id: 19, name: "오소진", parent: "학부모님", phone: "010-2120-1095" },
+            { id: 20, name: "오윤지", parent: "학부모님", phone: "010-9035-6165" },
+            { id: 21, name: "이다은", parent: "학부모님", phone: "010-5208-2120" },
+            { id: 22, name: "이한나", parent: "학부모님", phone: "010-5117-6338" },
+            { id: 23, name: "허주영", parent: "학부모님", phone: "010-7713-7103" },
+            { id: 24, name: "이세령", parent: "학부모님", phone: "010-7733-6265" }
+        ];
+
+        const availableDates = ['7/27(월)', '7/28(화)', '7/30(목)', '8/3(월)', '8/4(화)', '8/5(수)', '8/10(월)'];
+        const generateTimes = () => {
+            let times = [];
+            for (let h = 10; h < 20; h++) {
+                times.push(`${h}:00`); times.push(`${h}:30`);
+            }
+            return times;
+        };
+        const availableTimes = generateTimes();
+
+        // --- 실시간 데이터 변수 ---
+        let bookedSlots = {};
+        let optOuts = {};
+        let teacherNotes = {};
+        let completedStatus = {};
+
+        let currentNoteStudent = "";
+        let currentView = 'parent';
+        let selectedStudent = null;
+        let selectedDate = availableDates[0];
+        let selectedTime = null;
+        let isAuthenticated = false; 
+
+        // --- Firebase 연동 ---
+        if (db) {
+            db.collection("schoolApp").doc("class3-1").onSnapshot((doc) => {
+                if (doc.exists) {
+                    const data = doc.data();
+                    bookedSlots = data.bookedSlots || {};
+                    optOuts = data.optOuts || {};
+                    teacherNotes = data.teacherNotes || {};
+                    completedStatus = data.completedStatus || {};
+                }
+                if (currentView === 'parent') renderParentView();
+                else if (document.getElementById('main-content').innerHTML.includes('전체 상담 기록표')) renderReportView();
+                else renderTeacherView();
+            });
+        } else {
+            renderParentView();
+        }
+
+        function syncToFirebase() {
+            if (!db) return;
+            db.collection("schoolApp").doc("class3-1").set({
+                bookedSlots: bookedSlots,
+                optOuts: optOuts,
+                teacherNotes: teacherNotes,
+                completedStatus: completedStatus
+            }, { merge: true }).catch(error => { console.error("저장 에러:", error); });
+        }
+
+        // --- 모달 제어 함수 ---
+        function showModal(title, message, isError = false) {
+            const modal = document.getElementById('custom-modal');
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-message').innerText = message;
+            const icon = document.getElementById('modal-icon');
+            icon.innerHTML = isError ? '<i class="fas fa-exclamation-triangle text-red-500"></i>' : '<i class="fas fa-check-circle text-blue-500"></i>';
+            modal.classList.remove('hidden');
+        }
+
+        function closeModal() { document.getElementById('custom-modal').classList.add('hidden'); }
+
+        // 숫자키패드 호출 기능이 강화된 프롬프트
+        function customPrompt(title, message, inputType = 'text', defaultValue = '', inputMode = '') {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('prompt-modal');
+                document.getElementById('prompt-title').innerText = title;
+                document.getElementById('prompt-message').innerText = message;
+                const input = document.getElementById('prompt-input');
+                
+                input.style.display = 'block'; 
+                input.type = inputType;
+                input.value = defaultValue; 
+                
+                if (inputMode === 'numeric') {
+                    input.setAttribute('inputmode', 'numeric');
+                    input.setAttribute('pattern', '[0-9]*');
+                } else if (inputType === 'tel') {
+                    input.setAttribute('inputmode', 'tel');
+                    input.removeAttribute('pattern');
+                } else {
+                    input.removeAttribute('inputmode');
+                    input.removeAttribute('pattern');
+                }
+                
+                modal.classList.remove('hidden');
+                input.focus();
+                
+                setTimeout(() => { input.selectionStart = input.selectionEnd = input.value.length; }, 10);
+                
+                document.getElementById('prompt-confirm').onclick = () => { modal.classList.add('hidden'); resolve(input.value); };
+                document.getElementById('prompt-cancel').onclick = () => { modal.classList.add('hidden'); resolve(null); };
+            });
+        }
+        
+        function customConfirm(title, message) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('prompt-modal');
+                document.getElementById('prompt-title').innerText = title;
+                document.getElementById('prompt-message').innerText = message;
+                const input = document.getElementById('prompt-input');
+                
+                input.style.display = 'none'; 
+                modal.classList.remove('hidden');
+                
+                document.getElementById('prompt-confirm').onclick = () => {
+                    input.style.display = 'block'; 
+                    modal.classList.add('hidden');
+                    resolve(true);
+                };
+                document.getElementById('prompt-cancel').onclick = () => {
+                    input.style.display = 'block'; 
+                    modal.classList.add('hidden');
+                    resolve(false);
+                };
+            });
+        }
+
+        // --- 🌟 커스텀 드롭다운 로직 (버튼/화살표 터치 시에만 동작) ---
+        function toggleDropdown(dropdownId) {
+            const el = document.getElementById(dropdownId);
+            const isHidden = el.classList.contains('hidden');
+            
+            // 열려있는 다른 커스텀 드롭다운 닫기
+            document.querySelectorAll('.custom-dropdown').forEach(d => d.classList.add('hidden'));
+            
+            if (isHidden) {
+                el.classList.remove('hidden');
+            }
+        }
+
+        function selectCustomOption(id, value, label) {
+            const textEl = document.getElementById(id + '-text');
+            textEl.innerText = label;
+            textEl.dataset.value = value;
+            textEl.classList.remove('text-gray-400');
+            textEl.classList.add('text-gray-800');
+            document.getElementById(id + '-dropdown').classList.add('hidden');
+        }
+
+        // 빈 공간 클릭 시 드롭다운 닫기
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('button[onclick^="toggleDropdown"]') && !event.target.closest('.custom-dropdown')) {
+                document.querySelectorAll('.custom-dropdown').forEach(el => el.classList.add('hidden'));
+            }
+        });
+
+        function renderCustomSelect(id, options, defaultText) {
+            return `
+                <div class="relative">
+                    <div class="w-full border border-gray-300 bg-gray-50 rounded-xl p-2 pl-4 text-base flex justify-between items-center cursor-default">
+                        <span id="${id}-text" class="text-gray-700 font-bold truncate" data-value="${options[0].value}">${defaultText}</span>
+                        <!-- 화살표 동그라미 버튼 (이곳을 터치해야만 동작) -->
+                        <button type="button" onclick="toggleDropdown('${id}-dropdown')" class="w-10 h-10 bg-white shadow-sm border border-gray-200 rounded-full flex justify-center items-center text-blue-500 flex-shrink-0 active:bg-blue-100 hover:bg-blue-50 transition">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </div>
+                    <div id="${id}-dropdown" class="custom-dropdown hidden absolute z-[100] w-full mt-2 bg-white rounded-xl shadow-2xl border border-gray-200 max-h-56 overflow-y-auto left-0">
+                        ${options.map(o => `<div onclick="selectCustomOption('${id}', '${o.value}', '${o.label}')" class="${o.class || 'text-gray-700'} px-5 py-4 border-b border-gray-50 hover:bg-blue-50 active:bg-blue-100 font-bold cursor-pointer transition">${o.label}</div>`).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- 뷰 전환 ---
+        async function switchView(view) {
+            if (view === 'teacher' && currentView !== 'teacher') {
+                // 선생님 요청: 인증 시 숫자 전용 키패드 호출
+                const pin = await customPrompt('교사 인증', '교사 인증번호를 입력해주세요.', 'password', '', 'numeric');
+                if (pin !== '3495') {
+                    showModal('인증 실패', '인증번호가 일치하지 않습니다.', true);
+                    return; 
+                }
+            }
+            currentView = view;
+            const tabParent = document.getElementById('tab-parent');
+            const tabTeacher = document.getElementById('tab-teacher');
+            
+            if (view === 'parent') {
+                tabParent.className = "flex-1 py-3 bg-blue-600 text-white transition-colors";
+                tabTeacher.className = "flex-1 py-3 bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors";
+                renderParentView();
+            } else {
+                tabTeacher.className = "flex-1 py-3 bg-blue-600 text-white transition-colors";
+                tabParent.className = "flex-1 py-3 bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors";
+                renderTeacherView();
+            }
+        }
+
+        // --- 학부모 화면 렌더링 ---
+        function renderParentView() {
+            const container = document.getElementById('main-content');
+            let html = `
+                <div class="fade-in">
+                    <div class="bg-blue-50 border border-blue-100 rounded-2xl p-5 mb-6 shadow-sm">
+                        <p class="text-sm text-blue-900 leading-relaxed">
+                            <span class="font-bold text-blue-700 text-base block mb-1">안녕하세요. 3학년 1반 담임입니다. 🥰<br>
+                            우리 아이들의 더 나은 2학기 생활과 고교 입학 전 준비를 위해 전체 학부모님을 대상으로 상담을 진행합니다.</span>
+                            <span class="block mt-2 text-gray-700">* 아이가 문제 행동을 일으켜 진행하는 상담이 아니니 편안하게 신청해주세요!</span>
+                            <span class="text-gray-500 text-xs mt-3 block">※ 원치 않으시면 하단의 '미신청'을 눌러주세요.</span>
+                        </p>
+                    </div>
+                    <form id="bookingForm" onsubmit="event.preventDefault(); submitBooking();">
+                        <div class="mb-6 relative">
+                            <label class="block text-base font-bold text-gray-800 mb-2"><i class="fas fa-user-graduate text-blue-500 mr-1"></i> 학생 이름</label>
+                            
+                            <!-- 🌟 학부모용 커스텀 학생 선택 드롭다운 -->
+                            <div class="w-full border border-gray-200 bg-gray-50 rounded-xl p-3 pl-5 shadow-inner text-base font-medium flex justify-between items-center cursor-default">
+                                <span id="studentSelect-text" class="${selectedStudent ? 'text-gray-800 font-bold' : 'text-gray-400'}">${selectedStudent ? selectedStudent.name : '학생을 선택해주세요'}</span>
+                                <!-- 동그라미 화살표 버튼을 통해서만 반응 -->
+                                <button type="button" onclick="toggleDropdown('studentSelect-dropdown')" class="w-10 h-10 bg-white shadow-sm border border-gray-200 rounded-full flex justify-center items-center text-blue-500 flex-shrink-0 active:bg-blue-100 hover:bg-blue-50 transition">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                            </div>
+                            <div id="studentSelect-dropdown" class="custom-dropdown hidden absolute z-[100] w-full mt-2 bg-white rounded-xl shadow-2xl border border-gray-100 max-h-64 overflow-y-auto left-0">
+                                ${students.map(s => `<div onclick="chooseStudent(${s.id})" class="px-5 py-4 border-b border-gray-50 hover:bg-blue-50 active:bg-blue-100 font-bold text-gray-700 cursor-pointer transition">${s.name}</div>`).join('')}
+                            </div>
+                        </div>
+            `;
+
+            if (selectedStudent && isAuthenticated) {
+                let existingBookingHTML = '';
+                let myBooking = null;
+                for (const [key, value] of Object.entries(bookedSlots)) {
+                    if (value === `${selectedStudent.name} 학부모`) { myBooking = key; break; }
+                }
+                if (myBooking) {
+                    const [myDate, myTime] = myBooking.split('_');
+                    existingBookingHTML = `
+                        <div class="mb-6 fade-in bg-green-50 border border-green-200 rounded-xl p-4 shadow-sm flex items-start gap-3">
+                            <i class="fas fa-check-circle text-green-500 mt-1 text-lg"></i>
+                            <div>
+                                <p class="text-sm font-bold text-green-800">현재 예약된 일정이 있습니다.</p>
+                                <p class="text-sm text-green-700 mt-1">${myDate} ${myTime}</p>
+                                <p class="text-xs text-green-600 mt-1">* 시간을 변경하시려면 아래에서 새로운 날짜/시간을 선택 후 예약 버튼을 눌러 덮어씌워주세요.</p>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += `
+                        <div class="mb-6 fade-in" id="phoneContainer">
+                            <label class="block text-base font-bold text-gray-800 mb-2"><i class="fas fa-phone-alt text-blue-500 mr-1"></i> 상담받으실 연락처</label>
+                            <input type="tel" id="parentPhone" value="${selectedStudent.phone}" class="w-full border border-gray-200 bg-white shadow-sm rounded-xl p-4 focus:ring-2 focus:ring-blue-400 text-base font-medium" readonly>
+                            <p class="text-sm text-blue-600 mt-2 font-medium bg-blue-50 p-3 rounded-lg"><i class="fas fa-info-circle mr-1"></i> 제출 전 다시 한 번 연락처 변경 기회를 드립니다.</p>
+                        </div>
+                        <hr class="border-gray-300 mb-6 border-dashed">
+                        ${existingBookingHTML}
+                        <div class="mb-6">
+                            <label class="block text-base font-bold text-gray-800 mb-3"><i class="far fa-calendar-check text-blue-500 mr-1"></i> 상담 날짜 선택</label>
+                            <div class="flex overflow-x-auto gap-3 pb-3 -mx-1 px-1 snap-x" id="dateSelector">
+                                ${availableDates.map(date => `
+                                    <button type="button" onclick="selectDate('${date}')" 
+                                        class="snap-start flex-none px-5 py-3 rounded-full border-2 text-base font-bold transition-colors
+                                        ${date === selectedDate ? 'bg-blue-500 text-white border-blue-500 shadow-md' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
+                                        ${date}
+                                    </button>
+                                `).join('')}
+                            </div>
+                        </div>
+                        <div class="mb-8">
+                            <label class="block text-base font-bold text-gray-800 mb-3"><i class="far fa-clock text-blue-500 mr-1"></i> 시간 선택 (30분 단위)</label>
+                            <div class="grid grid-cols-3 gap-3" id="timeSlotsContainer"></div>
+                        </div>
+                        <div class="mb-10">
+                            <label class="block text-base font-bold text-gray-800 mb-3"><i class="far fa-comment-dots text-blue-500 mr-1"></i> 남기실 말씀 (선택)</label>
+                            <textarea id="memo" rows="3" class="w-full border border-gray-200 bg-gray-50 rounded-xl p-4 shadow-inner focus:ring-2 focus:ring-blue-400 text-base" placeholder="주로 상담하고 싶으신 내용(진로, 성적 등)을 적어주시면 큰 도움이 됩니다."></textarea>
+                        </div>
+                        <button type="submit" class="w-full bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold rounded-xl p-5 shadow-lg hover:from-blue-600 hover:to-cyan-600 transform transition active:scale-95 flex justify-center items-center gap-2 text-xl">
+                            <i class="fas fa-check-circle"></i> 상담 예약 완료하기
+                        </button>
+                        <button type="button" onclick="optOut()" class="w-full mt-4 bg-gray-100 text-gray-600 font-bold rounded-xl p-5 hover:bg-gray-200 transition text-base">
+                            미신청
+                        </button>
+                `;
+            }
+            html += `</form></div>`;
+            container.innerHTML = html;
+            if (selectedStudent && isAuthenticated) renderTimeSlots();
+        }
+
+        // --- 상호작용 로직 ---
+        async function chooseStudent(studentId) {
+            document.getElementById('studentSelect-dropdown').classList.add('hidden');
+            const student = students.find(s => s.id == studentId);
+            const phoneParts = student.phone.split('-');
+            const last4Digits = phoneParts[phoneParts.length - 1]; 
+            
+            // 선생님 요청: 연락처 뒷자리 인증 시 숫자 전용 키패드 호출 
+            const inputLast4 = await customPrompt('본인 확인', '개인정보 보호를 위해 이 링크를 안내 받으신 학부모님의 연락처 뒷자리(4자리)를 입력해주세요.', 'password', '', 'numeric');
+            
+            if (inputLast4 === last4Digits) {
+                selectedStudent = student;
+                isAuthenticated = true;
+                renderParentView(); 
+            } else {
+                if(inputLast4 !== null) showModal('인증 실패', '연락처 뒷자리가 일치하지 않습니다.', true);
+                selectedStudent = null;
+                isAuthenticated = false;
+                renderParentView(); 
+            }
+        }
+
+        function selectDate(date) { selectedDate = date; selectedTime = null; renderParentView(); }
+        function selectTime(time) { selectedTime = time; renderTimeSlots(); }
+
+        function renderTimeSlots() {
+            const container = document.getElementById('timeSlotsContainer');
+            if(!container) return;
+            let html = '';
+            availableTimes.forEach(time => {
+                const slotKey = `${selectedDate}_${time}`;
+                const bookedBy = bookedSlots[slotKey];
+                const isMyBooking = selectedStudent && bookedBy === `${selectedStudent.name} 학부모`;
+                const isBookedByOther = bookedBy !== undefined && !isMyBooking;
+                const isSelected = selectedTime === time;
+
+                if (isBookedByOther) {
+                    html += `<button type="button" disabled class="bg-gray-200 text-gray-500 border border-gray-300 rounded-xl p-3 text-sm font-bold cursor-not-allowed flex flex-col items-center justify-center gap-1">${time}<span>(마감)</span></button>`;
+                } else if (isMyBooking) {
+                    html += `<button type="button" onclick="selectTime('${time}')" class="border-2 rounded-xl p-3 text-sm font-bold transition-colors flex flex-col items-center justify-center gap-1 ${isSelected ? 'bg-green-500 text-white border-green-500 shadow-md' : 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100'}">${time}<span class="${isSelected ? 'text-green-100 font-normal' : 'text-green-600 font-normal'} text-xs">${isSelected ? '선택됨' : '기존 예약'}</span></button>`;
+                } else {
+                    html += `<button type="button" onclick="selectTime('${time}')" class="border-2 rounded-xl p-3 text-sm font-bold transition-colors flex flex-col items-center justify-center gap-1 ${isSelected ? 'bg-blue-500 text-white border-blue-500 shadow-md' : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50'}">${time}<span class="${isSelected ? 'text-blue-100 font-normal' : 'text-blue-500 font-normal'} text-xs">선택가능</span></button>`;
+                }
+            });
+            container.innerHTML = html;
+        }
+
+        // --- 데이터 제출 ---
+        async function submitBooking() {
+            if (!selectedStudent || !selectedTime) { showModal('입력 오류', '학생 및 시간을 선택해주세요.', true); return; }
+            const currentPhone = document.getElementById('parentPhone').value;
+            const slotKey = `${selectedDate}_${selectedTime}`;
+            const confirmedPhone = await customPrompt('연락처 최종 확인', `입력된 번호 [${currentPhone}]로\n담임 교사가 전화를 드려도 될까요?\n\n혹시 다른 연락처로 희망하신다면,\n아래 입력칸에서 번호를 수정한 후\n'확인'을 눌러주세요.`, 'tel', currentPhone);
+            if (confirmedPhone === null) return; 
+            if (confirmedPhone.trim() === '') { showModal('입력 오류', '연락처를 입력해주세요.', true); return; }
+
+            let oldBookingKey = null;
+            for (const [key, value] of Object.entries(bookedSlots)) {
+                if (value === `${selectedStudent.name} 학부모`) { oldBookingKey = key; break; }
+            }
+            if (oldBookingKey && oldBookingKey !== slotKey) delete bookedSlots[oldBookingKey];
+            
+            bookedSlots[slotKey] = `${selectedStudent.name} 학부모`;
+            if (optOuts[selectedStudent.name]) delete optOuts[selectedStudent.name];
+
+            syncToFirebase();
+            const isChange = oldBookingKey && oldBookingKey !== slotKey;
+            showModal(isChange ? '🎉 예약 변경 완료' : '🎉 예약 완료', `${selectedStudent.name} 학부모님,\n${selectedDate} ${selectedTime}에 상담 예약이 ${isChange ? '성공적으로 변경' : '완료'}되었습니다.\n\n해당 일시에 [${confirmedPhone}] 번호로 연락드리겠습니다.`);
+            
+            selectedTime = null; selectedStudent = null; isAuthenticated = false;
+            renderParentView();
+        }
+
+        async function optOut() {
+            if (!selectedStudent) { showModal('입력 오류', '학생 이름을 선택해주세요.', true); return; }
+            const reason = await customPrompt('미신청 사유', '상담 미신청 사유를 필수로 입력해주세요.\n(예: 직장 업무로 통화 어려움 등)');
+            if (reason === null) return; 
+            if (reason.trim() === '') { showModal('입력 누락', '미신청 사유를 입력하셔야 합니다.', true); return; }
+            
+            for (const [key, value] of Object.entries(bookedSlots)) {
+                if (value === `${selectedStudent.name} 학부모`) { delete bookedSlots[key]; break; }
+            }
+            optOuts[selectedStudent.name] = reason;
+
+            syncToFirebase();
+            showModal('안내', `상담 미신청 처리가 완료되었습니다.\n(입력하신 사유: ${reason})\n\n※ 미신청을 하더라도, 담임 교사가 필요하다고 판단되면 연락드릴 수 있습니다.`);
+            
+            selectedTime = null; selectedStudent = null; isAuthenticated = false;
+            renderParentView();
+        }
+
+        // --- 🌟 교사용 수동 예약 및 전체 초기화 로직 ---
+        function openTeacherModal(studentName = '') {
+            // 교사 수동 변경 시에도 동그라미 화살표 전용 커스텀 드롭다운 사용
+            let studentOptions = [{value:'', label:'-- 학생 선택 --'}].concat(students.map(s => ({value: s.name, label: s.name})));
+            document.getElementById('t-student-container').innerHTML = renderCustomSelect('t-student', studentOptions, studentName || '-- 학생 선택 --');
+            if (studentName) document.getElementById('t-student-text').dataset.value = studentName;
+            
+            let dateOptions = availableDates.map(d => ({value: d, label: d}));
+            document.getElementById('t-date-container').innerHTML = renderCustomSelect('t-date', dateOptions, availableDates[0]);
+            
+            let timeOptions = availableTimes.map(t => ({value: t, label: t}));
+            timeOptions.push({value: '미신청', label: '▶ 미신청 처리', class: 'text-red-500'});
+            timeOptions.push({value: '추후 결정', label: '▶ 추후 결정 처리', class: 'text-orange-500'});
+            document.getElementById('t-time-container').innerHTML = renderCustomSelect('t-time', timeOptions, availableTimes[0]);
+
+            document.getElementById('teacher-modal').classList.remove('hidden');
+        }
+
+        function closeTeacherModal() { document.getElementById('teacher-modal').classList.add('hidden'); }
+
+        function saveTeacherBooking() {
+            const studentName = document.getElementById('t-student-text').dataset.value;
+            const date = document.getElementById('t-date-text').dataset.value;
+            const time = document.getElementById('t-time-text').dataset.value;
+
+            if(!studentName) { showModal('오류', '학생을 선택하세요.', true); return; }
+
+            for (const [key, value] of Object.entries(bookedSlots)) {
+                if (value === `${studentName} 학부모`) { delete bookedSlots[key]; break; }
+            }
+            if (optOuts[studentName]) delete optOuts[studentName];
+
+            if (time === '미신청' || time === '추후 결정') {
+                optOuts[studentName] = `교사 수동 처리 (${time})`;
+                completedStatus[studentName] = false;
+                showModal('수동 변경 완료', `${studentName} 학생이 [${time}] 상태로 변경되었습니다.`);
+            } else {
+                const slotKey = `${date}_${time}`;
+                if (bookedSlots[slotKey] && bookedSlots[slotKey] !== `${studentName} 학부모`) {
+                    showModal('예약 불가', '해당 시간은 이미 다른 학부모님께서 예약하셨습니다.\n다른 시간을 선택해주세요.', true);
+                    return;
+                }
+                bookedSlots[slotKey] = `${studentName} 학부모`;
+                completedStatus[studentName] = false;
+                showModal('수동 변경 완료', `${studentName} 학생의 예약 일정이\n${date} ${time}으로 확정되었습니다.`);
+            }
+
+            syncToFirebase();
+            closeTeacherModal();
+            renderTeacherView();
+        }
+
+        async function resetAllData() {
+            const confirmed = await customConfirm('⚠️ 전체 초기화 경고', '정말 모든 예약, 미신청, 기록장 데이터를 초기화하시겠습니까?\n\n이 작업은 절대 되돌릴 수 없습니다!\n(반드시 테스트 종료 후에만 사용하세요)');
+            if (confirmed) {
+                const doubleCheck = await customPrompt('초기화 최종 확인', '정말 초기화를 진행하시려면\n아래 입력칸에 [초기화] 라고 정확히 입력해주세요.', 'text');
+                
+                if (doubleCheck === '초기화') {
+                    bookedSlots = {};
+                    optOuts = {};
+                    teacherNotes = {};
+                    completedStatus = {};
+                    syncToFirebase();
+                    renderTeacherView();
+                    showModal('초기화 완료', '모든 데이터가 성공적으로 싹 비워졌습니다.');
+                } else if (doubleCheck !== null) {
+                    showModal('초기화 취소', '입력한 단어가 일치하지 않아\n초기화가 안전하게 취소되었습니다.', true);
+                }
+            }
+        }
+
+        // --- 전체 사전 기록장 로직 ---
+        function openAllNotesModal() {
+            const container = document.getElementById('all-notes-container');
+            let html = '';
+            students.forEach(student => {
+                const notes = teacherNotes[student.name] || { pre: '', post: '' };
+                html += `
+                    <div class="bg-indigo-50 p-4 rounded-xl border border-indigo-100 shadow-sm">
+                        <label class="block text-sm font-bold text-indigo-900 mb-2">${student.name}</label>
+                        <textarea id="all-pre-${student.id}" rows="2" class="w-full border border-indigo-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-400 bg-white" placeholder="이 학생의 상담 전 참고사항을 입력하세요...">${notes.pre}</textarea>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+            document.getElementById('all-notes-modal').classList.remove('hidden');
+        }
+
+        function closeAllNotesModal() { document.getElementById('all-notes-modal').classList.add('hidden'); }
+
+        function saveAllNotes() {
+            students.forEach(student => {
+                const textarea = document.getElementById(`all-pre-${student.id}`);
+                if (textarea) {
+                    if (!teacherNotes[student.name]) teacherNotes[student.name] = { pre: '', post: '' };
+                    teacherNotes[student.name].pre = textarea.value;
+                }
+            });
+            syncToFirebase();
+            closeAllNotesModal();
+            showModal('일괄 저장 완료', '24명 전체 학생의 사전 기록이 안전하게 업데이트 되었습니다.');
+        }
+
+        // --- 개별 상담 기록장 & 종료 로직 ---
+        function openNotesModal(studentName) {
+            currentNoteStudent = studentName;
+            document.getElementById('note-student-name').innerText = studentName;
+            const notes = teacherNotes[studentName] || { pre: '', post: '' };
+            document.getElementById('pre-note').value = notes.pre;
+            document.getElementById('post-note').value = notes.post;
+            document.getElementById('notes-modal').classList.remove('hidden');
+        }
+
+        function closeNotesModal() { document.getElementById('notes-modal').classList.add('hidden'); currentNoteStudent = ""; }
+
+        function saveNotes() {
+            if (!currentNoteStudent) return;
+            teacherNotes[currentNoteStudent] = { pre: document.getElementById('pre-note').value, post: document.getElementById('post-note').value };
+            syncToFirebase();
+            closeNotesModal();
+            showModal('저장 완료', `${currentNoteStudent} 학생의 상담 기록이 안전하게 저장되었습니다.`);
+        }
+
+        async function completeBooking(studentName) {
+            const confirmed = await customConfirm('상담 종료 처리', `${studentName} 학부모님과의 상담을 종료하시겠습니까?\n종료 후에는 '상담기록' 버튼으로 전환됩니다.`);
+            if (confirmed) {
+                completedStatus[studentName] = true;
+                syncToFirebase();
+                renderTeacherView();
+            }
+        }
+
+        async function showReportTable() {
+            const confirmed = await customConfirm('전체 상담종료', '모든 일정을 마감하고 최종 상담 결과표(전체 표)를 확인하시겠습니까?');
+            if (confirmed) {
+                for (const key in bookedSlots) {
+                    const actualName = bookedSlots[key].replace(' 학부모', '');
+                    completedStatus[actualName] = true;
+                }
+                syncToFirebase();
+                renderReportView();
+            }
+        }
+
+        // --- 교사용 최종 보고서 렌더링 (전체 표) ---
+        function renderReportView() {
+            const container = document.getElementById('main-content');
+            let html = `
+                <div class="fade-in">
+                    <div class="flex justify-between items-center mb-5 border-b-2 border-blue-400 pb-3">
+                        <h2 class="font-bold text-2xl text-gray-800"><i class="fas fa-table text-blue-500 mr-2"></i>전체 상담 기록표</h2>
+                        <button onclick="renderTeacherView()" class="bg-gray-200 text-gray-700 font-bold py-2 px-3 rounded-lg hover:bg-gray-300 transition text-sm flex-shrink-0">
+                            <i class="fas fa-arrow-left mr-1"></i> 뒤로가기
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-200">
+                        <table class="min-w-full text-sm text-left">
+                            <thead class="bg-blue-50 text-blue-800 border-b border-gray-200">
+                                <tr>
+                                    <th class="px-4 py-3 font-bold whitespace-nowrap">이름</th>
+                                    <th class="px-4 py-3 font-bold whitespace-nowrap">상담일시</th>
+                                    <th class="px-4 py-3 font-bold min-w-[200px]">상담 내용 기록</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+            `;
+            
+            students.forEach(student => {
+                let bookingTime = "<span class='text-gray-400'>미예약</span>";
+                for (const [key, value] of Object.entries(bookedSlots)) {
+                    if (value === `${student.name} 학부모`) {
+                        const [date, time] = key.split('_');
+                        bookingTime = `${date} ${time}`;
+                        break;
+                    }
+                }
+                
+                let postNoteText = (teacherNotes[student.name] && teacherNotes[student.name].post) 
+                                ? teacherNotes[student.name].post.replace(/\n/g, '<br>') 
+                                : "";
+
+                if (optOuts[student.name]) {
+                    bookingTime = `<span class="text-red-500 font-medium">${optOuts[student.name].includes('교사 수동 처리') ? '추후 결정/미신청' : '미신청'}</span>`;
+                    if(!postNoteText) postNoteText = `<span class="text-red-400 text-xs">(사유: ${optOuts[student.name]})</span>`;
+                } else if (!postNoteText) {
+                    postNoteText = "<span class='text-gray-300 text-xs'>기록 없음</span>";
+                }
+
+                html += `
+                    <tr class="hover:bg-gray-50 transition-colors">
+                        <td class="px-4 py-4 font-bold text-gray-800 whitespace-nowrap">${student.name}</td>
+                        <td class="px-4 py-4 text-gray-600 whitespace-nowrap">${bookingTime}</td>
+                        <td class="px-4 py-4 text-gray-700 leading-relaxed">${postNoteText}</td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table></div><p class="text-xs text-gray-400 text-center mt-4">모든 학생의 데이터가 표시되었습니다.</p></div>`;
+            container.innerHTML = html;
+        }
+
+
+        // --- 교사용 화면 렌더링 (예약 현황 대시보드) ---
+        function renderTeacherView() {
+            const container = document.getElementById('main-content');
+            const getStudentPhone = (fullName) => {
+                const name = fullName.replace(' 학부모', '');
+                const student = students.find(s => s.name === name);
+                return student ? student.phone : '';
+            };
+
+            let html = `
+                <div class="fade-in">
+                    <div class="flex flex-col mb-6 border-b-2 border-blue-400 pb-4 gap-4">
+                        <h2 class="font-bold text-2xl text-gray-800"><i class="fas fa-clipboard-list text-blue-500 mr-2"></i>상담일정 예약현황</h2>
+                        
+                        <!-- 🌟 교사용 헤더 버튼 모음 -->
+                        <div class="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
+                            <button onclick="openAllNotesModal()" class="bg-indigo-50 text-indigo-700 font-bold py-2.5 px-3 rounded-xl shadow-sm hover:bg-indigo-100 transition text-sm flex-shrink-0 border border-indigo-200">
+                                <i class="fas fa-users mr-1"></i> 전체 사전기록
+                            </button>
+                            <button onclick="openTeacherModal()" class="bg-blue-600 text-white font-bold py-2.5 px-3 rounded-xl shadow-md hover:bg-blue-700 transition text-sm flex-shrink-0">
+                                <i class="fas fa-plus mr-1"></i> 추가
+                            </button>
+                            <button onclick="showReportTable()" class="bg-red-50 text-red-700 font-bold py-2.5 px-3 rounded-xl shadow-sm hover:bg-red-100 transition text-sm flex-shrink-0 border border-red-200">
+                                <i class="fas fa-flag-checkered mr-1"></i> 전체 상담종료
+                            </button>
+                            <button onclick="resetAllData()" class="bg-gray-100 text-gray-600 font-bold py-2.5 px-3 rounded-xl shadow-sm hover:bg-red-50 hover:text-red-600 transition text-sm flex-shrink-0 border border-gray-300">
+                                <i class="fas fa-trash-alt mr-1"></i> 전체 초기화
+                            </button>
+                        </div>
+                    </div>
+            `;
+
+            availableDates.forEach(date => {
+                let dateBookings = [];
+                availableTimes.forEach(time => {
+                    const key = `${date}_${time}`;
+                    if(bookedSlots[key]) dateBookings.push({ time, name: bookedSlots[key] });
+                });
+
+                if (dateBookings.length > 0) {
+                    html += `<div class="mb-8"><h3 class="font-bold text-gray-800 text-lg border-b-2 border-blue-200 pb-2 mb-4">${date}</h3><div class="flex flex-col gap-4">`;
+                    dateBookings.forEach(booking => {
+                        const actualName = booking.name.replace(' 학부모', '');
+                        const actualPhone = getStudentPhone(booking.name); 
+                        const isDone = completedStatus[actualName];
+                        
+                        html += `
+                                <div class="bg-white border-2 border-gray-100 rounded-2xl p-4 shadow-sm">
+                                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-100 pb-3 mb-3 gap-3">
+                                        <div class="flex items-center gap-2">
+                                            <span class="bg-blue-100 text-blue-800 text-sm font-bold px-3 py-1 rounded-lg">${booking.time}</span>
+                                            <span class="font-bold text-gray-800 text-base">${booking.name}</span>
+                                        </div>
+                                        <div class="flex flex-wrap gap-1.5 w-full sm:w-auto justify-end">
+                                            ${ isDone ?
+                                                `<button onclick="openNotesModal('${actualName}')" class="text-xs bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-100 font-bold border border-gray-300 whitespace-nowrap"><i class="fas fa-folder-open mr-1"></i>상담기록</button>`
+                                                :
+                                                `<button onclick="openNotesModal('${actualName}')" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-100 font-bold border border-blue-200 whitespace-nowrap"><i class="fas fa-book mr-1"></i>기록장</button>
+                                                <button onclick="openTeacherModal('${actualName}')" class="text-xs bg-gray-50 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-100 font-bold border border-gray-200 whitespace-nowrap"><i class="fas fa-pencil-alt mr-1"></i>시간변경</button>
+                                                <button onclick="completeBooking('${actualName}')" class="text-xs bg-green-50 text-green-700 px-3 py-1.5 rounded-lg hover:bg-green-100 font-bold border border-green-200 whitespace-nowrap"><i class="fas fa-check mr-1"></i>상담종료</button>`
+                                            }
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center justify-between">
+                                        <p class="text-sm text-gray-600 font-medium"><i class="fas fa-mobile-alt mr-2"></i> ${actualPhone}</p>
+                                        <div class="flex gap-2">
+                                            <a href="tel:${actualPhone}" class="text-center bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-2 px-3 rounded-lg transition-colors"><i class="fas fa-phone"></i></a>
+                                            <a href="sms:${actualPhone}" class="text-center bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold py-2 px-3 rounded-lg transition-colors"><i class="fas fa-comment-sms"></i></a>
+                                        </div>
+                                    </div>
+                                </div>
+                        `;
+                    });
+                    html += `</div></div>`;
+                }
+            });
+
+            const optOutKeys = Object.keys(optOuts);
+            if (optOutKeys.length > 0) {
+                html += `<div class="mb-8 mt-10"><h3 class="font-bold text-red-600 text-lg border-b-2 border-red-200 pb-2 mb-4"><i class="fas fa-user-times mr-2"></i>미신청 및 추후결정 (${optOutKeys.length}명)</h3><div class="flex flex-col gap-4">`;
+                optOutKeys.forEach(studentName => {
+                    const actualPhone = getStudentPhone(studentName + " 학부모");
+                    const reason = optOuts[studentName];
+                    const isDone = completedStatus[studentName];
+                    
+                    html += `
+                            <div class="bg-red-50 border-2 border-red-100 rounded-2xl p-4 shadow-sm">
+                                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-red-100 pb-3 mb-3 gap-3">
+                                    <span class="font-bold text-gray-800 text-base">${studentName} 학부모</span>
+                                    <div class="flex flex-wrap gap-1.5 w-full sm:w-auto justify-end">
+                                        ${ isDone ?
+                                            `<button onclick="openNotesModal('${studentName}')" class="text-xs bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-100 font-bold border border-gray-300 whitespace-nowrap"><i class="fas fa-folder-open mr-1"></i>상담기록</button>`
+                                            :
+                                            `<button onclick="openNotesModal('${studentName}')" class="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-100 font-bold border border-blue-200 whitespace-nowrap"><i class="fas fa-book mr-1"></i>기록장</button>
+                                            <button onclick="openTeacherModal('${studentName}')" class="text-xs bg-red-50 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-100 font-bold border border-red-200 whitespace-nowrap"><i class="fas fa-calendar-plus mr-1"></i>예약잡기</button>`
+                                        }
+                                    </div>
+                                </div>
+                                <div class="bg-white rounded-lg p-3 border border-red-100 mb-3">
+                                    <p class="text-sm text-red-700 font-medium"><span class="font-bold mr-1">상태/사유:</span> ${reason}</p>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <p class="text-sm text-gray-600 font-medium"><i class="fas fa-mobile-alt mr-2"></i> ${actualPhone}</p>
+                                    <div class="flex gap-2">
+                                        <a href="tel:${actualPhone}" class="text-center bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-2 px-3 rounded-lg transition-colors"><i class="fas fa-phone"></i></a>
+                                        <a href="sms:${actualPhone}" class="text-center bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold py-2 px-3 rounded-lg transition-colors"><i class="fas fa-comment-sms"></i></a>
+                                    </div>
+                                </div>
+                            </div>
+                    `;
+                });
+                html += `</div></div>`;
+            }
+            html += `</div>`;
+            container.innerHTML = html;
+        }
+
+    </script>
+</body>
+</html>

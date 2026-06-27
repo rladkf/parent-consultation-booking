@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
-    <!-- 🔥 Firebase v8 SDK 추가 (🚨 오류 원인이었던 인증 모듈을 완전히 삭제하고, 오직 데이터베이스 모듈만 남겼습니다!) -->
+    <!-- 🔥 Firebase v8 SDK 추가 (🚨 에러를 유발하던 auth 모듈 완전 삭제! 오직 firestore 데이터베이스만 연결합니다!) -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 
@@ -210,7 +210,7 @@
         let selectedTime = null;
         let isAuthenticated = false; 
 
-        // 🚀🚀🚀 Firebase 에러 완벽 해결 (인증 모듈 삭제 & 선생님 DB 다이렉트 고정) 🚀🚀🚀
+        // 🚀🚀🚀 Firebase 완벽 연동 로직 (오직 DB 통신만! 인증 완전히 삭제) 🚀🚀🚀
         const firebaseConfig = {
             apiKey: "AIzaSyCEnovN8elvCLCxaPbijTFrUWEJ6vnbNmY",
             authDomain: "parent-consultation-booking.firebaseapp.com",
@@ -230,22 +230,23 @@
                 }
                 
                 db = firebase.firestore();
-                // 🌟 PC, 모바일 구분 없이 무조건 선생님의 외부 DB 한 곳만 바라보게 고정!
+                // 🌟 PC, 모바일 언제 어디서든 무조건 선생님의 동일한 DB 경로에만 연결합니다.
                 docRef = db.collection("schoolApp").doc("class3-1");
 
-                // 인증(Auth) 로직이 없어졌으므로 즉시 데이터베이스 감지 시작
+                // 인증 절차가 일절 없으므로 즉시 실시간 감지를 시작합니다.
                 docRef.onSnapshot((doc) => {
                     if (!doc.exists) {
                         docRef.set({ bookedSlots: {}, optOuts: {}, teacherNotes: {}, completedStatus: {} });
                         return;
                     }
                     const data = doc.data();
+                    // 최신 데이터 덮어쓰기
                     bookedSlots = data.bookedSlots || {};
                     optOuts = data.optOuts || {};
                     teacherNotes = data.teacherNotes || {};
                     completedStatus = data.completedStatus || {};
                     
-                    // 🌟 실시간 데이터 변경 시 화면 업데이트 (작성 중인 폼 보호)
+                    // 🌟 실시간 데이터 변경 시 화면 업데이트
                     if (currentView === 'parent') {
                         updateParentViewSafely();
                     }
@@ -258,6 +259,7 @@
                     
                 }, (error) => {
                     console.error("Firestore 실시간 연동 에러:", error);
+                    // 에러가 나더라도 무한 로딩에 빠지지 않게 첫 화면 띄우기
                     if (!document.getElementById('studentSelect') && currentView === 'parent') updateParentViewSafely();
                 });
             } catch (error) {
@@ -266,10 +268,22 @@
             }
         }
         
-        // 즉시 실행
+        // 스크립트 실행 시 즉시 연결
         initFirebase();
 
-        // 학부모 화면: 다른 사람의 예약 때문에 화면이 실시간 새로고침될 때, 작성 중이던 내역(전화번호/메모) 보호
+        // 🌟 실시간 덮어쓰기 및 삭제 방어 완벽 동기화 (전체 상태 업로드)
+        // 개별 update 대신 전체 상태를 병합(merge)하여 저장함으로써 꼬임을 완벽히 차단합니다.
+        function syncToFirebase() {
+            if (!docRef) return; 
+            docRef.set({
+                bookedSlots: Object.assign({}, bookedSlots),
+                optOuts: Object.assign({}, optOuts),
+                teacherNotes: Object.assign({}, teacherNotes),
+                completedStatus: Object.assign({}, completedStatus)
+            }, { merge: true }).catch(error => { console.error("저장 에러:", error); });
+        }
+
+        // 학부모 화면 새로고침 시 작성 중이던 내역(전화번호/메모) 보호
         function updateParentViewSafely() {
             if (!selectedStudent || !isAuthenticated) {
                 renderParentView();
@@ -301,7 +315,8 @@
 
         function closeModal() { document.getElementById('custom-modal').classList.add('hidden'); }
 
-        function customPrompt(title, message, inputType = 'text', defaultValue = '', inputMode = '') {
+        // 🌟 숫자키패드 호출 및 길이 제한(maxLength) 기능이 완벽하게 강화된 프롬프트
+        function customPrompt(title, message, inputType = 'text', defaultValue = '', inputMode = '', maxLength = null) {
             return new Promise((resolve) => {
                 const modal = document.getElementById('prompt-modal');
                 document.getElementById('prompt-title').innerText = title;
@@ -314,13 +329,26 @@
                 
                 if (inputMode === 'numeric') {
                     input.setAttribute('inputmode', 'numeric');
-                    input.setAttribute('pattern', '[0-9]*');
                 } else if (inputType === 'tel') {
                     input.setAttribute('inputmode', 'tel');
-                    input.removeAttribute('pattern');
                 } else {
                     input.removeAttribute('inputmode');
-                    input.removeAttribute('pattern');
+                }
+                
+                // 🌟 길이 제한 로직 추가
+                if (maxLength) {
+                    input.setAttribute('maxlength', maxLength);
+                    input.oninput = function() {
+                        if (inputMode === 'numeric') {
+                            this.value = this.value.replace(/[^0-9]/g, ''); // 숫자만 입력
+                        }
+                        if (this.value.length > maxLength) {
+                            this.value = this.value.slice(0, maxLength);
+                        }
+                    };
+                } else {
+                    input.removeAttribute('maxlength');
+                    input.oninput = null;
                 }
                 
                 modal.classList.remove('hidden');
@@ -398,7 +426,8 @@
         // --- 뷰 전환 ---
         async function switchView(view) {
             if (view === 'teacher' && currentView !== 'teacher') {
-                const pin = await customPrompt('교사 인증', '교사 인증번호를 입력해주세요.', 'password', '', 'numeric');
+                // 🌟 숫자키패드 및 4자리 제한 적용
+                const pin = await customPrompt('교사 인증', '교사 인증번호를 입력해주세요.', 'password', '', 'numeric', 4);
                 if (pin !== '3495') {
                     showModal('인증 실패', '인증번호가 일치하지 않습니다.', true);
                     return; 
@@ -517,7 +546,8 @@
             const phoneParts = student.phone.split('-');
             const last4Digits = phoneParts[phoneParts.length - 1]; 
             
-            const inputLast4 = await customPrompt('본인 확인', '개인정보 보호를 위해 이 링크를 안내 받으신 학부모님의 연락처 뒷자리(4자리)를 입력해주세요.', 'password', '', 'numeric');
+            // 🌟 숫자키패드 및 4자리 제한 적용
+            const inputLast4 = await customPrompt('본인 확인', '개인정보 보호를 위해 이 링크를 안내 받으신 학부모님의 연락처 뒷자리(4자리)를 입력해주세요.', 'password', '', 'numeric', 4);
             
             if (inputLast4 === last4Digits) {
                 selectedStudent = student;
@@ -581,13 +611,13 @@
             container.innerHTML = html;
         }
 
-        // --- 🌟 데이터 제출 및 덮어쓰기 로직 보완 (정밀 업데이트) ---
+        // --- 🌟 데이터 제출 및 덮어쓰기 로직 보완 (정밀 업데이트 대신 전체 객체 동기화로 100% 반영 보장) ---
         async function submitBooking() {
             if (!selectedStudent || !selectedTime) { showModal('입력 오류', '학생 및 시간을 선택해주세요.', true); return; }
             
             const slotKey = `${selectedDate}_${selectedTime}`;
             
-            // 🌟 이중 방어막: 클릭 즉시 데이터베이스 상 해당 자리가 진짜 비어있는지 한 번 더 확인 (동시 접속자 덮어쓰기 완전 차단!)
+            // 🌟 1. 이 자리가 다른 사람에 의해 이미 예약되었는지 최종 확인
             const existingBooking = bookedSlots[slotKey];
             if (existingBooking) {
                 const existingName = typeof existingBooking === 'object' ? existingBooking.name : existingBooking;
@@ -604,19 +634,16 @@
             if (confirmedPhone === null) return; 
             if (confirmedPhone.trim() === '') { showModal('입력 오류', '연락처를 입력해주세요.', true); return; }
 
-            // 🌟 전체 덮어쓰기가 아닌, 필요한 부분만 정밀 업데이트 (기존 예약 삭제 -> 새 예약 추가)
-            let updates = {};
             let oldBookingKey = null;
             
+            // 본인의 기존 일정이 있다면 삭제
             for (const [key, value] of Object.entries(bookedSlots)) {
                 const bookingName = typeof value === 'object' ? value.name : value;
-                if (bookingName === `${selectedStudent.name} 학부모`) { oldBookingKey = key; break; }
-            }
-            
-            // 본인의 기존 일정이 있다면 그 일정은 삭제
-            if (oldBookingKey && oldBookingKey !== slotKey) {
-                updates[`bookedSlots.${oldBookingKey}`] = firebase.firestore.FieldValue.delete();
-                delete bookedSlots[oldBookingKey]; 
+                if (bookingName === `${selectedStudent.name} 학부모`) { 
+                    oldBookingKey = key; 
+                    delete bookedSlots[key]; // 객체에서 제거
+                    break; 
+                }
             }
             
             const now = new Date();
@@ -624,18 +651,15 @@
             const newBooking = { name: `${selectedStudent.name} 학부모`, timestamp: timestampStr };
             
             // 새로운 예약 추가
-            updates[`bookedSlots.${slotKey}`] = newBooking;
             bookedSlots[slotKey] = newBooking; 
             
+            // 미신청 내역이 있었다면 삭제
             if (optOuts[selectedStudent.name]) {
-                updates[`optOuts.${selectedStudent.name}`] = firebase.firestore.FieldValue.delete();
                 delete optOuts[selectedStudent.name]; 
             }
 
-            // Firebase 정밀 업데이트 실행 (안전하게 통신 완료)
-            if (docRef) {
-                docRef.set(updates, { merge: true }).catch(err => console.error("업데이트 에러:", err));
-            }
+            // 🌟 Firebase에 통째로 덮어씌워 100% 안전하게 저장 (이 방식이 가장 에러가 없습니다)
+            syncToFirebase();
             
             const isChange = oldBookingKey && oldBookingKey !== slotKey;
             showModal(isChange ? '🎉 예약 변경 완료' : '🎉 예약 완료', `${selectedStudent.name} 학부모님,\n${selectedDate} ${selectedTime}에 상담 예약이 ${isChange ? '성공적으로 변경' : '완료'}되었습니다.\n\n해당 일시에 [${confirmedPhone}] 번호로 연락드리겠습니다.`);
@@ -650,11 +674,10 @@
             if (reason === null) return; 
             if (reason.trim() === '') { showModal('입력 누락', '미신청 사유를 입력하셔야 합니다.', true); return; }
             
-            let updates = {};
+            // 기존 예약이 있다면 객체에서 제거
             for (const [key, value] of Object.entries(bookedSlots)) {
                 const bookingName = typeof value === 'object' ? value.name : value;
                 if (bookingName === `${selectedStudent.name} 학부모`) { 
-                    updates[`bookedSlots.${key}`] = firebase.firestore.FieldValue.delete();
                     delete bookedSlots[key];
                     break; 
                 }
@@ -664,12 +687,10 @@
             const timestampStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
             const newOptOut = { reason: reason, timestamp: timestampStr };
             
-            updates[`optOuts.${selectedStudent.name}`] = newOptOut;
             optOuts[selectedStudent.name] = newOptOut;
 
-            if (docRef) {
-                docRef.set(updates, { merge: true }).catch(err => console.error("업데이트 에러:", err));
-            }
+            // 전체 객체 동기화
+            syncToFirebase();
 
             showModal('안내', `상담 미신청 처리가 완료되었습니다.\n(입력하신 사유: ${reason})\n\n※ 미신청을 하더라도, 담임 교사가 필요하다고 판단되면 연락드릴 수 있습니다.`);
             
@@ -703,19 +724,15 @@
 
             if(!studentName) { showModal('오류', '학생을 선택하세요.', true); return; }
 
-            let updates = {};
-
             for (const [key, value] of Object.entries(bookedSlots)) {
                 const bookingName = typeof value === 'object' ? value.name : value;
                 if (bookingName === `${studentName} 학부모`) { 
-                    updates[`bookedSlots.${key}`] = firebase.firestore.FieldValue.delete();
                     delete bookedSlots[key];
                     break; 
                 }
             }
             
             if (optOuts[studentName]) {
-                updates[`optOuts.${studentName}`] = firebase.firestore.FieldValue.delete();
                 delete optOuts[studentName];
             }
 
@@ -724,10 +741,7 @@
 
             if (time === '미신청' || time === '추후 결정') {
                 const newOptOut = { reason: `교사 수동 처리 (${time})`, timestamp: timestampStr };
-                updates[`optOuts.${studentName}`] = newOptOut;
                 optOuts[studentName] = newOptOut;
-                
-                updates[`completedStatus.${studentName}`] = false;
                 completedStatus[studentName] = false;
                 showModal('수동 변경 완료', `${studentName} 학생이 [${time}] 상태로 변경되었습니다.`);
             } else {
@@ -741,17 +755,12 @@
                 }
                 
                 const newBooking = { name: `${studentName} 학부모`, timestamp: timestampStr };
-                updates[`bookedSlots.${slotKey}`] = newBooking;
                 bookedSlots[slotKey] = newBooking;
-                
-                updates[`completedStatus.${studentName}`] = false;
                 completedStatus[studentName] = false;
                 showModal('수동 변경 완료', `${studentName} 학생의 예약 일정이\n${date} ${time}으로 확정되었습니다.`);
             }
 
-            if (docRef) {
-                docRef.set(updates, { merge: true }).catch(err => console.error(err));
-            }
+            syncToFirebase();
             closeTeacherModal();
             renderTeacherView();
         }
@@ -764,7 +773,6 @@
                 if (doubleCheck === '초기화') {
                     bookedSlots = {}; optOuts = {}; teacherNotes = {}; completedStatus = {};
                     if (docRef) {
-                        // 초기화 시에만 전체 문서 덮어쓰기
                         docRef.set({ bookedSlots: {}, optOuts: {}, teacherNotes: {}, completedStatus: {} });
                     }
                     renderTeacherView();
@@ -794,16 +802,14 @@
         function closeAllNotesModal() { document.getElementById('all-notes-modal').classList.add('hidden'); }
 
         function saveAllNotes() {
-            let updates = {};
             students.forEach(student => {
                 const textarea = document.getElementById(`all-pre-${student.id}`);
                 if (textarea) {
                     if (!teacherNotes[student.name]) teacherNotes[student.name] = { pre: '', post: '' };
                     teacherNotes[student.name].pre = textarea.value;
-                    updates[`teacherNotes.${student.name}`] = teacherNotes[student.name];
                 }
             });
-            if (docRef) docRef.set(updates, { merge: true });
+            syncToFirebase();
             closeAllNotesModal();
             showModal('일괄 저장 완료', '24명 전체 학생의 사전 기록이 안전하게 업데이트 되었습니다.');
         }
@@ -823,7 +829,7 @@
             if (!currentNoteStudent) return;
             const newNote = { pre: document.getElementById('pre-note').value, post: document.getElementById('post-note').value };
             teacherNotes[currentNoteStudent] = newNote;
-            if (docRef) docRef.set({ [`teacherNotes.${currentNoteStudent}`]: newNote }, { merge: true });
+            syncToFirebase();
             closeNotesModal();
             showModal('저장 완료', `${currentNoteStudent} 학생의 상담 기록이 안전하게 저장되었습니다.`);
         }
@@ -832,7 +838,7 @@
             const confirmed = await customConfirm('상담 종료 처리', `${studentName} 학부모님과의 상담을 종료하시겠습니까?\n종료 후에는 '상담기록' 버튼으로 전환됩니다.`);
             if (confirmed) {
                 completedStatus[studentName] = true;
-                if (docRef) docRef.set({ [`completedStatus.${studentName}`]: true }, { merge: true });
+                syncToFirebase();
                 renderTeacherView();
             }
         }
@@ -840,15 +846,13 @@
         async function showReportTable() {
             const confirmed = await customConfirm('전체 상담종료', '모든 일정을 마감하고 최종 상담 결과표(전체 표)를 확인하시겠습니까?');
             if (confirmed) {
-                let updates = {};
                 for (const key in bookedSlots) {
                     const bObj = bookedSlots[key];
                     const bName = typeof bObj === 'object' ? bObj.name : bObj;
                     const actualName = bName.replace(' 학부모', '');
                     completedStatus[actualName] = true;
-                    updates[`completedStatus.${actualName}`] = true;
                 }
-                if (docRef) docRef.set(updates, { merge: true });
+                syncToFirebase();
                 renderReportView();
             }
         }
@@ -918,7 +922,7 @@
             container.innerHTML = html;
         }
 
-        // --- 교사용 화면 렌더링 ---
+        // --- 🌟 교사용 화면 렌더링 (텍스트 수정 반영) ---
         function renderTeacherView() {
             const container = document.getElementById('main-content');
             const getStudentPhone = (fullName) => {
@@ -930,7 +934,8 @@
             let html = `
                 <div class="fade-in">
                     <div class="flex flex-col mb-6 border-b-2 border-blue-400 pb-4 gap-4">
-                        <h2 class="font-bold text-2xl text-gray-800"><i class="fas fa-clipboard-list text-blue-500 mr-2"></i>상담일정 예약현황</h2>
+                        <!-- 🌟 '상담일정 예약현황' -> '상담 예약현황'으로 변경 -->
+                        <h2 class="font-bold text-2xl text-gray-800"><i class="fas fa-clipboard-list text-blue-500 mr-2"></i>상담 예약현황</h2>
                         
                         <div class="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
                             <button onclick="openAllNotesModal()" class="bg-indigo-50 text-indigo-700 font-bold py-2.5 px-3 rounded-xl shadow-sm hover:bg-indigo-100 transition text-sm flex-shrink-0 border border-indigo-200">

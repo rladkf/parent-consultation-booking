@@ -7,8 +7,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
-    <!-- 🔥 Firebase v8 SDK 추가 (실시간 연동을 위한 라이브러리) -->
+    <!-- 🔥 Firebase v8 SDK 추가 -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
 
     <style>
@@ -247,11 +248,9 @@
                     
                     // 데이터 변경 시 화면 업데이트
                     if (currentView === 'parent') {
-                        // 🌟 수정된 부분: 최초 접속 시 '데이터를 불러오는 중' 상태를 없애고 학부모 화면을 그립니다.
                         if (!document.getElementById('studentSelect')) {
                             renderParentView();
                         }
-                        // 🌟 학부모 화면: 폼 작성 중 화면이 날아가는 것을 방지하기 위해 시간표만 업데이트!
                         else if (selectedStudent && isAuthenticated) {
                             renderTimeSlots();
                         }
@@ -260,7 +259,6 @@
                         renderReportView();
                     }
                     else {
-                        // 🌟 교사 화면: 예약이 들어오는 즉시 대시보드가 실시간으로 업데이트됨
                         renderTeacherView();
                     }
                     
@@ -269,7 +267,6 @@
                     if (error.code === 'permission-denied') {
                         showModal("🚨 실시간 연동 차단됨 (권한 오류)", "Firebase 보안 규칙이 닫혀있어 데이터 연동이 불가능합니다.\n\nFirebase 콘솔 > Firestore Database > [규칙] 탭에서\nallow read, write: if true;\n로 수정 후 [게시]를 반드시 눌러주세요.", true);
                     }
-                    // 에러가 나더라도 무한 로딩에 빠지지 않게 화면은 표시
                     if (!document.getElementById('studentSelect') && currentView === 'parent') {
                         renderParentView();
                     }
@@ -285,12 +282,13 @@
 
         function syncToFirebase() {
             if (!db) return;
+            // 🌟 수정: merge: true를 제거하여 덮어쓰기(삭제된 예약 반영)가 완벽하게 클라우드에 적용되도록 수정
             db.collection("schoolApp").doc("class3-1").set({
                 bookedSlots: bookedSlots,
                 optOuts: optOuts,
                 teacherNotes: teacherNotes,
                 completedStatus: completedStatus
-            }, { merge: true }).catch(error => { console.error("저장 에러:", error); });
+            }).catch(error => { console.error("저장 에러:", error); });
         }
 
         // --- 모달 제어 함수 ---
@@ -410,7 +408,6 @@
         // --- 뷰 전환 ---
         async function switchView(view) {
             if (view === 'teacher' && currentView !== 'teacher') {
-                // 선생님 요청: 인증 시 숫자 전용 키패드 호출
                 const pin = await customPrompt('교사 인증', '교사 인증번호를 입력해주세요.', 'password', '', 'numeric');
                 if (pin !== '3495') {
                     showModal('인증 실패', '인증번호가 일치하지 않습니다.', true);
@@ -467,7 +464,9 @@
                 let existingBookingHTML = '';
                 let myBooking = null;
                 for (const [key, value] of Object.entries(bookedSlots)) {
-                    if (value === `${selectedStudent.name} 학부모`) { myBooking = key; break; }
+                    // 객체로 저장된 경우와 텍스트로 저장된 경우(하위 호환성) 모두 처리
+                    const bookingName = typeof value === 'object' ? value.name : value;
+                    if (bookingName === `${selectedStudent.name} 학부모`) { myBooking = key; break; }
                 }
                 if (myBooking) {
                     const [myDate, myTime] = myBooking.split('_');
@@ -531,7 +530,6 @@
             const phoneParts = student.phone.split('-');
             const last4Digits = phoneParts[phoneParts.length - 1]; 
             
-            // 선생님 요청: 연락처 뒷자리 인증 시 숫자 전용 키패드 호출 
             const inputLast4 = await customPrompt('본인 확인', '개인정보 보호를 위해 이 링크를 안내 받으신 학부모님의 연락처 뒷자리(4자리)를 입력해주세요.', 'password', '', 'numeric');
             
             if (inputLast4 === last4Digits) {
@@ -546,12 +544,10 @@
             }
         }
 
-        // 🌟 수정: 스크롤 초기화 방지 및 재터치 시 해제 기능
         function selectDate(date) { 
             selectedDate = date; 
             selectedTime = null; 
             
-            // 날짜 버튼 UI만 개별적으로 업데이트 (스크롤 튕김 현상 방지)
             const dateButtons = document.querySelectorAll('#dateSelector button');
             dateButtons.forEach(btn => {
                 if (btn.innerText.trim() === date) {
@@ -566,7 +562,7 @@
 
         function selectTime(time) { 
             if (selectedTime === time) {
-                selectedTime = null; // 재터치 시 선택 해제
+                selectedTime = null; 
             } else {
                 selectedTime = time; 
             }
@@ -579,9 +575,11 @@
             let html = '';
             availableTimes.forEach(time => {
                 const slotKey = `${selectedDate}_${time}`;
-                const bookedBy = bookedSlots[slotKey];
-                const isMyBooking = selectedStudent && bookedBy === `${selectedStudent.name} 학부모`;
-                const isBookedByOther = bookedBy !== undefined && !isMyBooking;
+                const bookedByObj = bookedSlots[slotKey];
+                const bookedByName = bookedByObj ? (typeof bookedByObj === 'object' ? bookedByObj.name : bookedByObj) : undefined;
+                
+                const isMyBooking = selectedStudent && bookedByName === `${selectedStudent.name} 학부모`;
+                const isBookedByOther = bookedByName !== undefined && !isMyBooking;
                 const isSelected = selectedTime === time;
 
                 if (isBookedByOther) {
@@ -589,13 +587,14 @@
                 } else if (isMyBooking) {
                     html += `<button type="button" onclick="selectTime('${time}')" class="border-2 rounded-xl p-3 text-sm font-bold transition-colors flex flex-col items-center justify-center gap-1 ${isSelected ? 'bg-green-500 text-white border-green-500 shadow-md' : 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100'}">${time}<span class="${isSelected ? 'text-green-100 font-normal' : 'text-green-600 font-normal'} text-xs">${isSelected ? '선택됨' : '기존 예약'}</span></button>`;
                 } else {
-                    html += `<button type="button" onclick="selectTime('${time}')" class="border-2 rounded-xl p-3 text-sm font-bold transition-colors flex flex-col items-center justify-center gap-1 ${isSelected ? 'bg-blue-500 text-white border-blue-500 shadow-md' : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50'}">${time}<span class="${isSelected ? 'text-blue-100 font-normal' : 'text-blue-500 font-normal'} text-xs">선택가능</span></button>`;
+                    // 🌟 수정: 선택되었을 때 '선택가능'이 아니라 '선택됨'으로 표시
+                    html += `<button type="button" onclick="selectTime('${time}')" class="border-2 rounded-xl p-3 text-sm font-bold transition-colors flex flex-col items-center justify-center gap-1 ${isSelected ? 'bg-blue-500 text-white border-blue-500 shadow-md' : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50'}">${time}<span class="${isSelected ? 'text-blue-100 font-normal' : 'text-blue-500 font-normal'} text-xs">${isSelected ? '선택됨' : '선택가능'}</span></button>`;
                 }
             });
             container.innerHTML = html;
         }
 
-        // --- 데이터 제출 ---
+        // --- 🌟 데이터 제출 및 신청일시 저장 로직 ---
         async function submitBooking() {
             if (!selectedStudent || !selectedTime) { showModal('입력 오류', '학생 및 시간을 선택해주세요.', true); return; }
             const currentPhone = document.getElementById('parentPhone').value;
@@ -604,13 +603,23 @@
             if (confirmedPhone === null) return; 
             if (confirmedPhone.trim() === '') { showModal('입력 오류', '연락처를 입력해주세요.', true); return; }
 
+            // 🌟 덮어쓰기 로직: 기존 예약 건 삭제
             let oldBookingKey = null;
             for (const [key, value] of Object.entries(bookedSlots)) {
-                if (value === `${selectedStudent.name} 학부모`) { oldBookingKey = key; break; }
+                const bookingName = typeof value === 'object' ? value.name : value;
+                if (bookingName === `${selectedStudent.name} 학부모`) { oldBookingKey = key; break; }
             }
             if (oldBookingKey && oldBookingKey !== slotKey) delete bookedSlots[oldBookingKey];
             
-            bookedSlots[slotKey] = `${selectedStudent.name} 학부모`;
+            // 타임스탬프 (신청일시) 기록
+            const now = new Date();
+            const timestampStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+            
+            bookedSlots[slotKey] = {
+                name: `${selectedStudent.name} 학부모`,
+                timestamp: timestampStr
+            };
+            
             if (optOuts[selectedStudent.name]) delete optOuts[selectedStudent.name];
 
             syncToFirebase();
@@ -628,9 +637,17 @@
             if (reason.trim() === '') { showModal('입력 누락', '미신청 사유를 입력하셔야 합니다.', true); return; }
             
             for (const [key, value] of Object.entries(bookedSlots)) {
-                if (value === `${selectedStudent.name} 학부모`) { delete bookedSlots[key]; break; }
+                const bookingName = typeof value === 'object' ? value.name : value;
+                if (bookingName === `${selectedStudent.name} 학부모`) { delete bookedSlots[key]; break; }
             }
-            optOuts[selectedStudent.name] = reason;
+            
+            const now = new Date();
+            const timestampStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+
+            optOuts[selectedStudent.name] = {
+                reason: reason,
+                timestamp: timestampStr
+            };
 
             syncToFirebase();
             showModal('안내', `상담 미신청 처리가 완료되었습니다.\n(입력하신 사유: ${reason})\n\n※ 미신청을 하더라도, 담임 교사가 필요하다고 판단되면 연락드릴 수 있습니다.`);
@@ -641,7 +658,6 @@
 
         // --- 🌟 교사용 수동 예약 및 전체 초기화 로직 ---
         function openTeacherModal(studentName = '') {
-            // 교사 수동 변경 시에도 동그라미 화살표 전용 커스텀 드롭다운 사용
             let studentOptions = [{value:'', label:'-- 학생 선택 --'}].concat(students.map(s => ({value: s.name, label: s.name})));
             document.getElementById('t-student-container').innerHTML = renderCustomSelect('t-student', studentOptions, studentName || '-- 학생 선택 --');
             if (studentName) document.getElementById('t-student-text').dataset.value = studentName;
@@ -667,21 +683,35 @@
             if(!studentName) { showModal('오류', '학생을 선택하세요.', true); return; }
 
             for (const [key, value] of Object.entries(bookedSlots)) {
-                if (value === `${studentName} 학부모`) { delete bookedSlots[key]; break; }
+                const bookingName = typeof value === 'object' ? value.name : value;
+                if (bookingName === `${studentName} 학부모`) { delete bookedSlots[key]; break; }
             }
             if (optOuts[studentName]) delete optOuts[studentName];
 
+            const now = new Date();
+            const timestampStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')} (교사 수동)`;
+
             if (time === '미신청' || time === '추후 결정') {
-                optOuts[studentName] = `교사 수동 처리 (${time})`;
+                optOuts[studentName] = {
+                    reason: `교사 수동 처리 (${time})`,
+                    timestamp: timestampStr
+                };
                 completedStatus[studentName] = false;
                 showModal('수동 변경 완료', `${studentName} 학생이 [${time}] 상태로 변경되었습니다.`);
             } else {
                 const slotKey = `${date}_${time}`;
-                if (bookedSlots[slotKey] && bookedSlots[slotKey] !== `${studentName} 학부모`) {
+                const existingBooking = bookedSlots[slotKey];
+                const existingName = existingBooking ? (typeof existingBooking === 'object' ? existingBooking.name : existingBooking) : undefined;
+                
+                if (existingName && existingName !== `${studentName} 학부모`) {
                     showModal('예약 불가', '해당 시간은 이미 다른 학부모님께서 예약하셨습니다.\n다른 시간을 선택해주세요.', true);
                     return;
                 }
-                bookedSlots[slotKey] = `${studentName} 학부모`;
+                
+                bookedSlots[slotKey] = {
+                    name: `${studentName} 학부모`,
+                    timestamp: timestampStr
+                };
                 completedStatus[studentName] = false;
                 showModal('수동 변경 완료', `${studentName} 학생의 예약 일정이\n${date} ${time}으로 확정되었습니다.`);
             }
@@ -775,7 +805,9 @@
             const confirmed = await customConfirm('전체 상담종료', '모든 일정을 마감하고 최종 상담 결과표(전체 표)를 확인하시겠습니까?');
             if (confirmed) {
                 for (const key in bookedSlots) {
-                    const actualName = bookedSlots[key].replace(' 학부모', '');
+                    const bObj = bookedSlots[key];
+                    const bName = typeof bObj === 'object' ? bObj.name : bObj;
+                    const actualName = bName.replace(' 학부모', '');
                     completedStatus[actualName] = true;
                 }
                 syncToFirebase();
@@ -808,10 +840,14 @@
             
             students.forEach(student => {
                 let bookingTime = "<span class='text-gray-400'>미예약</span>";
+                let reqTime = "";
+
                 for (const [key, value] of Object.entries(bookedSlots)) {
-                    if (value === `${student.name} 학부모`) {
+                    const bName = typeof value === 'object' ? value.name : value;
+                    if (bName === `${student.name} 학부모`) {
                         const [date, time] = key.split('_');
                         bookingTime = `${date} ${time}`;
+                        reqTime = typeof value === 'object' && value.timestamp ? `<br><span class="text-xs text-gray-400 font-normal">신청: ${value.timestamp}</span>` : '';
                         break;
                     }
                 }
@@ -821,8 +857,12 @@
                                 : "";
 
                 if (optOuts[student.name]) {
-                    bookingTime = `<span class="text-red-500 font-medium">${optOuts[student.name].includes('교사 수동 처리') ? '추후 결정/미신청' : '미신청'}</span>`;
-                    if(!postNoteText) postNoteText = `<span class="text-red-400 text-xs">(사유: ${optOuts[student.name]})</span>`;
+                    const optObj = optOuts[student.name];
+                    const reason = typeof optObj === 'object' ? optObj.reason : optObj;
+                    const oTs = typeof optObj === 'object' && optObj.timestamp ? `<br><span class="text-xs text-gray-400 font-normal">신청: ${optObj.timestamp}</span>` : '';
+                    
+                    bookingTime = `<span class="text-red-500 font-medium">${reason.includes('교사 수동 처리') ? '추후 결정/미신청' : '미신청'}</span>${oTs}`;
+                    if(!postNoteText) postNoteText = `<span class="text-red-400 text-xs">(사유: ${reason})</span>`;
                 } else if (!postNoteText) {
                     postNoteText = "<span class='text-gray-300 text-xs'>기록 없음</span>";
                 }
@@ -830,7 +870,7 @@
                 html += `
                     <tr class="hover:bg-gray-50 transition-colors">
                         <td class="px-4 py-4 font-bold text-gray-800 whitespace-nowrap">${student.name}</td>
-                        <td class="px-4 py-4 text-gray-600 whitespace-nowrap">${bookingTime}</td>
+                        <td class="px-4 py-4 text-gray-600 whitespace-nowrap">${bookingTime}${reqTime}</td>
                         <td class="px-4 py-4 text-gray-700 leading-relaxed">${postNoteText}</td>
                     </tr>
                 `;
@@ -877,7 +917,12 @@
                 let dateBookings = [];
                 availableTimes.forEach(time => {
                     const key = `${date}_${time}`;
-                    if(bookedSlots[key]) dateBookings.push({ time, name: bookedSlots[key] });
+                    if(bookedSlots[key]) {
+                        const bObj = bookedSlots[key];
+                        const bName = typeof bObj === 'object' ? bObj.name : bObj;
+                        const bTs = typeof bObj === 'object' && bObj.timestamp ? bObj.timestamp : '';
+                        dateBookings.push({ time, name: bName, timestamp: bTs });
+                    }
                 });
 
                 if (dateBookings.length > 0) {
@@ -890,11 +935,12 @@
                         html += `
                                 <div class="bg-white border-2 border-gray-100 rounded-2xl p-4 shadow-sm">
                                     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-100 pb-3 mb-3 gap-3">
-                                        <div class="flex items-center gap-2">
+                                        <div class="flex items-center gap-2 flex-wrap">
                                             <span class="bg-blue-100 text-blue-800 text-sm font-bold px-3 py-1 rounded-lg">${booking.time}</span>
                                             <span class="font-bold text-gray-800 text-base">${booking.name}</span>
+                                            ${booking.timestamp ? `<span class="text-xs text-gray-400 font-normal ml-1"><i class="far fa-clock"></i> 신청: ${booking.timestamp}</span>` : ''}
                                         </div>
-                                        <div class="flex flex-wrap gap-1.5 w-full sm:w-auto justify-end">
+                                        <div class="flex flex-wrap gap-1.5 w-full sm:w-auto justify-end mt-2 sm:mt-0">
                                             ${ isDone ?
                                                 `<button onclick="openNotesModal('${actualName}')" class="text-xs bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-100 font-bold border border-gray-300 whitespace-nowrap"><i class="fas fa-folder-open mr-1"></i>상담기록</button>`
                                                 :
@@ -923,14 +969,21 @@
                 html += `<div class="mb-8 mt-10"><h3 class="font-bold text-red-600 text-lg border-b-2 border-red-200 pb-2 mb-4"><i class="fas fa-user-times mr-2"></i>미신청 및 추후결정 (${optOutKeys.length}명)</h3><div class="flex flex-col gap-4">`;
                 optOutKeys.forEach(studentName => {
                     const actualPhone = getStudentPhone(studentName + " 학부모");
-                    const reason = optOuts[studentName];
+                    
+                    const optObj = optOuts[studentName];
+                    const reason = typeof optObj === 'object' ? optObj.reason : optObj;
+                    const oTs = typeof optObj === 'object' && optObj.timestamp ? optObj.timestamp : '';
+                    
                     const isDone = completedStatus[studentName];
                     
                     html += `
                             <div class="bg-red-50 border-2 border-red-100 rounded-2xl p-4 shadow-sm">
                                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-red-100 pb-3 mb-3 gap-3">
-                                    <span class="font-bold text-gray-800 text-base">${studentName} 학부모</span>
-                                    <div class="flex flex-wrap gap-1.5 w-full sm:w-auto justify-end">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="font-bold text-gray-800 text-base">${studentName} 학부모</span>
+                                        ${oTs ? `<span class="text-xs text-gray-400 font-normal ml-1"><i class="far fa-clock"></i> 신청: ${oTs}</span>` : ''}
+                                    </div>
+                                    <div class="flex flex-wrap gap-1.5 w-full sm:w-auto justify-end mt-2 sm:mt-0">
                                         ${ isDone ?
                                             `<button onclick="openNotesModal('${studentName}')" class="text-xs bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-100 font-bold border border-gray-300 whitespace-nowrap"><i class="fas fa-folder-open mr-1"></i>상담기록</button>`
                                             :
